@@ -6,8 +6,9 @@ graphics.off()
 source("x02_read_features.R")
 
 #brain.feature = scale(cbind(fsl.vbm, alff, reho, label.fa, label.md, tract.fa, tract.md))
-#brain.feature = cbind(fsl.vbm.pca[, 1:35], reho.pca[,1:35])
-brain.feature = scale(fsl.vbm.pca[,1:50]) 
+#brain.feature = scale(cbind(fsl.vbm.pca, alff.pca, reho.pca, label.fa.pca, label.md.pca, tract.fa.pca, tract.md.pca))
+#brain.feature = scale(cbind(label.md.pca, tract.md.pca,falff.pca)) 
+brain.feature = scale(cbind(label.md.pca, tract.md.pca))
 
 df.all = cbind(subject.info[,-1], brain.feature)
 
@@ -18,7 +19,8 @@ svm.cv.fun = function(dat, k, cost.seq){
 
 	num.sample = nrow(dat)
 	cv.k = sample(rep(1:k, each = ceiling(num.sample/k)))[1:num.sample]
-	test.error=0
+	test.error=rep(NA, k)
+	train.error=rep(NA, k)
 	for (i in 1:k){	
 		dat.train = dat[cv.k!=i,]
 		dat.test = dat[cv.k==i,]
@@ -28,69 +30,75 @@ svm.cv.fun = function(dat, k, cost.seq){
 		
 		svm.fit = svm(y~., dat.train, kernel = "linear", cost = tune.svm$best.parameters$cost)
 		y.pred = predict(svm.fit, dat.test)
+		y.pred.train = predict(svm.fit, dat.train)
 		
 		print(table(dat.test$y, y.pred))
+		print("prediction of training data:")
+		print(table(dat.train$y, y.pred.train))
 		
-		error.i = mean(dat.test$y != y.pred)
-		print(error.i)
-		test.error= test.error*(i-1)/i + error.i/i
+		test.error[i] = mean(dat.test$y != y.pred)
+		train.error[i] = mean(dat.train$y != y.pred.train)
 	}
-	return(test.error)
+	return(list(test.error, train.error))
 }
 # svm binomial regression:
 
 cost.seq = 10^seq(2, -3, length = 20)
 k=5
-
+error = data.frame(cv = c(1:k))
+train.error = data.frame(cv = c(1:k))
 library(e1071)
 
 ## ---------------------select data for hc and trauma:---------------------
 
-df.ptsd.hc = df.all[df.all$ptsd==0|df.all$ptsd==1,]
+df.hc.trauma = df.all[df.all$ptsd==0|df.all$ptsd==1,]
 print("dimension for hc and trauma dataset")
-print(dim(df.ptsd.hc))
-print(table(df.ptsd.hc$ptsd))
-x = model.matrix(df.ptsd.hc$ptsd~., df.ptsd.hc)
-y = as.factor(df.ptsd.hc$ptsd)
+print(dim(df.hc.trauma))
+print(table(df.hc.trauma$ptsd))
+
+x = model.matrix(df.hc.trauma$ptsd~., df.hc.trauma)
+y = as.factor(df.hc.trauma$ptsd)
 dat = data.frame(x = x, y = y)
 
-set.seed(1)
-error = svm.cv.fun(dat, k, cost.seq)
+set.seed(111)
 
-print("average test error for hc and trauma:") 
-print(error) 
+svm.cv.result = svm.cv.fun(dat, k, cost.seq)
+print(svm.cv.result)
+error$hc.trauma = svm.cv.result[[1]]
+train.error$hc.trauma = svm.cv.result[[2]]
 
 ##--------------------- select data for hc and ptsd: -------------------------------------- 
 
-df.ptsd.trauma = df.all[df.all$ptsd==0|df.all$ptsd==2,]
+df.hc.ptsd = df.all[df.all$ptsd==0|df.all$ptsd==2,]
 print("dimension for hc and ptsd dataset")
-print(dim(df.ptsd.trauma))
-print(table(df.ptsd.trauma$ptsd))
+print(dim(df.hc.ptsd))
+print(table(df.hc.ptsd$ptsd))
 
-x = model.matrix(df.ptsd.trauma$ptsd~., df.ptsd.trauma)
-y = as.factor(df.ptsd.trauma$ptsd)
+x = model.matrix(df.hc.ptsd$ptsd~., df.hc.ptsd)
+y = as.factor(df.hc.ptsd$ptsd)
 dat = data.frame(x = x, y = y)
 
 set.seed(123)
-error = svm.cv.fun(dat, k, cost.seq)
+svm.cv.result = svm.cv.fun(dat, k, cost.seq)
+error$hc.ptsd = svm.cv.result[[1]]
+train.error$hc.ptsd = svm.cv.result[[2]]
 
-print("average test error for hc and ptsd:")
-print(error)
+##--------------------- select data for trauma and ptsd:---------------------
 
-##--------------------- select data for ptsd and trauma:---------------------
-#
-#df.hc.trauma = df.all[df.all$ptsd==1|df.all$ptsd==2,]
-#print("dimension for hc and trauma data set")
-#print(dim(df.hc.trauma))
-#
-#x = model.matrix(df.hc.trauma$ptsd~., df.hc.trauma)
-#y = as.factor(df.hc.trauma$ptsd)
-#dat = data.frame(x = x, y = y)
-#
-#set.seed(3)
-#error = svm.cv.fun(dat, k, cost.seq)
-#print(error)
-#
+df.trauma.ptsd = df.all[df.all$ptsd==1|df.all$ptsd==2,]
+print("dimension for hc and trauma data set")
+print(dim(df.trauma.ptsd))
+print(table(df.trauma.ptsd$ptsd))
+
+x = model.matrix(df.trauma.ptsd$ptsd~., df.trauma.ptsd)
+y = as.factor(df.trauma.ptsd$ptsd)
+dat = data.frame(x = x, y = y)
+
+set.seed(333)
+svm.cv.result = svm.cv.fun(dat, k, cost.seq)
+error$ptsd.trauma = svm.cv.result[[1]]
+train.error$ptsd.truama = svm.cv.result[[2]]
+
 # ---------------------select data for ptsd and others:---------------------
 #df.ptsd.other = df.all
 #df.ptsd.other$ptsd = df.all$ptsd==2
@@ -104,3 +112,8 @@ print(error)
 #error = svm.cv.fun(dat, k, cost.seq)
 #print(error)
 #
+
+print(error)
+print(colMeans(error))
+print(train.error)
+print(colMeans(train.error))
