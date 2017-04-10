@@ -8,19 +8,25 @@ source("x02_read_features.R")
 #brain.feature = scale(cbind(fsl.vbm, alff, reho, label.fa, label.md, tract.fa, tract.md))
 #brain.feature = scale(cbind(fsl.vbm.pca, alff.pca, reho.pca, label.fa.pca, label.md.pca, tract.fa.pca, tract.md.pca))
 #brain.feature = scale(cbind(label.md.pca, tract.md.pca,falff.pca)) 
-brain.feature = scale(label.md)
+brain.feature = scale(cbind(label.md))
 
 df.all = cbind(subject.info[,-1], brain.feature)
 
-compute.acc = function(y,yhat){
-	acc<-length(which(y==yhat))/length(y)
+pca.cv.fun = function(dat.train, dat.test,culmulative.variance){
+	print("data for training:")
+	print(head(dat.train))
+	print(dim(dat.train))
+	pca = princomp(dat.train)
+	cul.var = cumsum(pca$sdev^2/sum(pca$sdev^2))
+	num.comp = sum(cul.var<culmulative.variance)+1
+	train.pca = pca$score[,1:num.comp]
+	
+	test.pca = dat.test%*%pca$loading
+	test.pca = test.pca[,1:num.comp]
 
-	ylevel = unique(y)
-	sensi<-length(which(y==yhat & y==ylevel[2]))/length(which(y==ylevel[2]))
-	speci<-length(which(y==yhat & y==ylevel[1]))/length(which(y==ylevel[1]))
-	temp<-c(acc, sensi, speci)
-	return(temp)
+	return(list(train.pca, test.pca))
 }
+
 
 svm.cv.fun = function(x, y, k, cost.seq){
 	
@@ -30,14 +36,16 @@ svm.cv.fun = function(x, y, k, cost.seq){
 
 	num.sample = nrow(x)
 	cv.k = sample(rep(1:k, each = ceiling(num.sample/k)))[1:num.sample]
-	
-	test.result=data.frame(acc=rep(NA,k), sensi=rep(NA,k), speci=rep(NA,k))
-	train.result=data.frame(acc=rep(NA,k), sensi=rep(NA,k), speci=rep(NA,k))
-	
+	test.error=rep(NA, k)
+	train.error=rep(NA, k)
 	for (i in 1:k){	
 		x.train = x[cv.k!=i,]
 		x.test = x[cv.k==i,]
 
+		pca.x = pca.cv.fun(x.train, x.test, culmulative.variance)
+		x.train = pca.x[1]
+		x.test = pca.x[2]
+	
 		dat.train = data.frame(x=x.train, y=y[cv.k!=i])
 		dat.test = data.frame(x=x.test, y=y[cv.k==i])
 
@@ -48,25 +56,21 @@ svm.cv.fun = function(x, y, k, cost.seq){
 		y.pred = predict(svm.fit, dat.test)
 		y.pred.train = predict(svm.fit, dat.train)
 		
-		print("prediction of testing data:")
 		print(table(dat.test$y, y.pred))
 		print("prediction of training data:")
 		print(table(dat.train$y, y.pred.train))
 		
-		result.test = compute.acc(dat.test$y, y.pred)
-		result.train = compute.acc(dat.train$y, y.pred.train)
-
-		test.result[i,] = result.test
-		train.result[i,] = result.train
+		test.error[i] = mean(dat.test$y != y.pred)
+		train.error[i] = mean(dat.train$y != y.pred.train)
 	}
-	return(list(test.result, train.result))
+	return(list(test.error, train.error))
 }
 # svm binomial regression:
 
 cost.seq = 10^seq(2, -3, length = 20)
 k=5
-test.result = data.frame(cv = c(1:k))
-train.result = data.frame(cv = c(1:k))
+error = data.frame(cv = c(1:k))
+train.error = data.frame(cv = c(1:k))
 library(e1071)
 
 ## ---------------------select data for hc and trauma:---------------------
@@ -78,13 +82,13 @@ print(table(df.hc.trauma$ptsd))
 
 x = model.matrix(df.hc.trauma$ptsd~., df.hc.trauma)
 y = as.factor(df.hc.trauma$ptsd)
+
 set.seed(111)
 
 svm.cv.result = svm.cv.fun(x, y, k, cost.seq)
-sapply(1:ncol(svm.cv.result[[1]]), function(i) test.result[,paste0('hc.trauma','.',names(svm.cv.result[[1]])[i])] <<- svm.cv.result[[1]][,i]) 
-sapply(1:ncol(svm.cv.result[[2]]), function(i) train.result[,paste0('hc.trauma','.',names(svm.cv.result[[2]])[i])] <<- svm.cv.result[[2]][,i]) 
-#test.result$hc.trauma = svm.cv.result[[1]]
-#train.result$hc.trauma = svm.cv.result[[2]]
+print(svm.cv.result)
+error$hc.trauma = svm.cv.result[[1]]
+train.error$hc.trauma = svm.cv.result[[2]]
 
 ##--------------------- select data for hc and ptsd: -------------------------------------- 
 
@@ -95,13 +99,11 @@ print(table(df.hc.ptsd$ptsd))
 
 x = model.matrix(df.hc.ptsd$ptsd~., df.hc.ptsd)
 y = as.factor(df.hc.ptsd$ptsd)
-set.seed(123)
 
+set.seed(123)
 svm.cv.result = svm.cv.fun(x, y, k, cost.seq)
-sapply(1:ncol(svm.cv.result[[1]]), function(i) test.result[,paste0('hc.ptsd','.',names(svm.cv.result[[1]])[i])] <<- svm.cv.result[[1]][,i]) 
-sapply(1:ncol(svm.cv.result[[2]]), function(i) train.result[,paste0('hc.ptsd','.',names(svm.cv.result[[2]])[i])] <<- svm.cv.result[[2]][,i]) 
-#test.result$hc.ptsd = svm.cv.result[[1]]
-#train.result$hc.ptsd = svm.cv.result[[2]]
+error$hc.ptsd = svm.cv.result[[1]]
+train.error$hc.ptsd = svm.cv.result[[2]]
 
 ##--------------------- select data for trauma and ptsd:---------------------
 
@@ -112,13 +114,11 @@ print(table(df.trauma.ptsd$ptsd))
 
 x = model.matrix(df.trauma.ptsd$ptsd~., df.trauma.ptsd)
 y = as.factor(df.trauma.ptsd$ptsd)
-set.seed(333)
 
+set.seed(333)
 svm.cv.result = svm.cv.fun(x, y, k, cost.seq)
-sapply(1:ncol(svm.cv.result[[1]]), function(i) test.result[,paste0('trauma.ptsd','.',names(svm.cv.result[[1]])[i])] <<- svm.cv.result[[1]][,i]) 
-sapply(1:ncol(svm.cv.result[[1]]), function(i) train.result[,paste0('trauma.ptsd','.',names(svm.cv.result[[2]])[i])] <<- svm.cv.result[[2]][,i]) 
-#test.result$ptsd.trauma = svm.cv.result[[1]]
-#train.result$ptsd.truama = svm.cv.result[[2]]
+error$ptsd.trauma = svm.cv.result[[1]]
+train.error$ptsd.truama = svm.cv.result[[2]]
 
 # ---------------------select data for ptsd and others:---------------------
 #df.ptsd.other = df.all
@@ -130,11 +130,11 @@ sapply(1:ncol(svm.cv.result[[1]]), function(i) train.result[,paste0('trauma.ptsd
 #dat = data.frame(x = x, y = y)
 #
 #set.seed(1)
-#test.result = svm.cv.fun(dat, k, cost.seq)
-#print(test.result)
+#error = svm.cv.fun(dat, k, cost.seq)
+#print(error)
 #
 
-print(test.result)
-print(colMeans(test.result))
-print(train.result)
-print(colMeans(train.result))
+print(error)
+print(colMeans(error))
+print(train.error)
+print(colMeans(train.error))
