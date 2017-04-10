@@ -1,38 +1,39 @@
 #!/usr/bin/env Rscript
 
-img.info=read.csv("PTSD_HC_Final2.csv")
+img.info=read.csv("PNC_LOC_SubInfo.csv")
+# sort the rows according to subject id:
+img.info=img.info[order(img.info$SUBJID),]
+
 img.info=img.info[!duplicated(img.info$SUBJID),]
 
-img.complete=read.table("outa02_subject_t1_rest_dti2.txt", header=F)
+# subjects with compelete brain images (t1, rest, dti)
+img.complete=read.table("outa02_subject_t1_rest_dti.txt", header=F)
 
 #img.info.complete=merge(img.info, img.complete, by.x="SUBJID", by.y="V1")
 complete.rows=(img.info$SUBJID %in% img.complete$V1)
 img.info.complete=img.info[complete.rows,]
 
-img.ptsd=img.info.complete[img.info.complete$ptsd==1,]
-img.hc=img.info.complete[img.info.complete$ptsd==0,]
-img.ptsd2=img.info.complete[img.info.complete$ptsd==2,]
+img.loc1=img.info.complete[img.info.complete$group_ind==1,]
+img.loc0=img.info.complete[img.info.complete$group_ind==0,]
 
-num.img.ptsd=nrow(img.ptsd)
-num.img.ptsd2=nrow(img.ptsd2)
-num.img.hc=nrow(img.hc)
+num.img.loc0=nrow(img.loc0)
+num.img.loc1=nrow(img.loc1)
 
-# decide the number of subject for template: we select minium of hc and ptsd as required by fslvbm
-num.each.group=min(num.img.ptsd, num.img.hc, num.img.ptsd2)
+# decide the number of subject for template: we select minium of hc and loc as required by fslvbm
+num.each.group=min(num.img.loc0, num.img.loc1)
 
 # randomly select subjects as templates
-template.ptsd=img.ptsd[sample(num.img.ptsd, num.each.group),"SUBJID"]
-template.ptsd2=img.ptsd2[sample(num.img.ptsd2, num.each.group),"SUBJID"]
-template.hc=img.hc[sample(num.img.hc, num.each.group),"SUBJID"]
+template.loc0=img.loc0[sample(num.img.loc0, num.each.group),"SUBJID"]
+template.loc1=img.loc1[sample(num.img.loc1, num.each.group),"SUBJID"]
 
-template=sort(c(template.ptsd, template.hc, template.ptsd2))
+template=sort(c(template.loc0, template.loc1))
 
 write.table(template, file="template_list", col.names=F, row.names=F)
-write.table(img.info.complete, file="outb01_ptsd_hc_info2.txt", col.names=T, row.names=F)
+write.table(img.info.complete, file="outb01_loc_info.txt", col.names=T, row.names=F)
 
 # adding .nii.gz to subject ids so that they match the brain imaging file names:
 system("sed -i 's/$/.nii.gz/' template_list")
 
 # move the file to required directory:
 #file.rename(from="template_list", to="Reslut03_Nifti_T1/template_list")
-system("mv template_list Result03_Nifti_T1_2")
+system("mv template_list Result03_Nifti_T1")

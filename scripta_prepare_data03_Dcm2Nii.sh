@@ -2,7 +2,7 @@
 
 set -e
 
-in_dir="Result02_Dicom_T1_REST_DTI2"
+in_dir="Result02_Dicom_T1_REST_DTI"
 base_dir=$(pwd)
 
 
@@ -25,7 +25,7 @@ base_dir=$(pwd)
 #done<temp_list
 
 ######################### T1 Image: ######################
-out_dir="Result03_Nifti_T1_2"
+out_dir="Result03_Nifti_T1"
 mkdir -p $out_dir
 
 cd $in_dir
