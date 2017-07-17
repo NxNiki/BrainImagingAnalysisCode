@@ -7,12 +7,14 @@ graphics.off()
 #report.name = "fc"
 
 source("scriptd_stats01_read_feature.R")
-#brain.feature = scale(cbind(spm.vbm, alff, reho, label.fa, label.md, tract.fa, tract.md))
-brain.feature = scale(cbind(reho))
-report.name = "reho_svmt"
+brain.feature = scale(cbind(fsl.vbm, alff, reho, label.fa, label.md, tract.fa, tract.md))
+report.name = "vbmrsdtifc_svmt_relief"
+#brain.feature = scale(cbind(spm.vbm))
+#report.name = "spm.vbm"
 
 # paramters for this script:
-p.thresh = .01
+p.thresh = .001
+relief.thresh = .01
 cost.seq = 10^seq(2, -3, length = 20)
 report.rows = 3
 k=7
@@ -33,44 +35,6 @@ select.feature = function(feature.in, factor, p){
 	return(feature.idx)
 
 }
-
-################################################
-# This function gives the weights of the hiperplane
-################################################
-svm.weights<-function(model){
-w=0
-  if(model$nclasses==2){
-       w=t(model$coefs)%*%model$SV
-  }else{    #when we deal with OVO svm classification
-      ## compute start-index
-      start <- c(1, cumsum(model$nSV)+1)
-      start <- start[-length(start)]
-
-      calcw <- function (i,j) {
-        ## ranges for class i and j:
-        ri <- start[i] : (start[i] + model$nSV[i] - 1)
-        rj <- start[j] : (start[j] + model$nSV[j] - 1)
-
-      ## coefs for (i,j):
-        coef1 <- model$coefs[ri, j-1]
-        coef2 <- model$coefs[rj, i]
-        ## return w values:
-        w=t(coef1)%*%model$SV[ri,]+t(coef2)%*%model$SV[rj,]
-        return(w)
-      }
-
-      W=NULL
-      for (i in 1 : (model$nclasses - 1)){
-        for (j in (i + 1) : model$nclasses){
-          wi=calcw(i,j)
-          W=rbind(W,wi)
-        }
-      }
-      w=W
-  }
-  return(w)
-}
-
 
 compute.acc = function(y,yhat){
 	#print("----------")
@@ -123,11 +87,19 @@ svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 		subject.info.train = subject.info[cv.k!=i,]
 		subject.info.test = subject.info[which(cv.k==i),,drop = F]
 		
-		# select features bfactor runing t test:
+		# select features by runing t test:
 		feature.idx = select.feature(brain.feature.train, subject.info.train$ptsd, p.thresh)
 		feature.train = cbind(subject.info.train, y=brain.feature.train[, feature.idx, drop=F])
 		feature.test = cbind(subject.info.test, y=brain.feature.test[, feature.idx, drop=F])
+
+		#print(head(feature.train))
+		# ReliefF to select features:
+		feature.train$ptsd = as.factor(feature.train$ptsd)
+		feature.estReliefF <- attrEval(ptsd ~ ., feature.train, estimator="ReliefFexpRank", ReliefIterations=30)
 		
+		print(range(feature.estReliefF))
+		idx.relief = which(feature.estReliefF>0)
+
 		feature.idx.all = c(feature.idx.all, feature.idx)
 		svm.x.train = model.matrix(feature.train$ptsd~., feature.train)
 		svm.y.train = as.factor(feature.train$ptsd)
@@ -135,21 +107,20 @@ svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 		svm.x.test = model.matrix(feature.test$ptsd~., feature.test)
 		svm.y.test = as.factor(feature.test$ptsd)
 		
-		svm.dat.train = data.frame(x=svm.x.train, y=svm.y.train)
-		svm.dat.test = data.frame(x=svm.x.test, y=svm.y.test)
+		svm.dat.train = data.frame(x=svm.x.train[,idx.relief], y=svm.y.train)
+		svm.dat.test = data.frame(x=svm.x.test[,idx.relief], y=svm.y.test)
 
 		tune.svm = tune(svm, y~., data = svm.dat.train, kernel = "linear", ranges = list(cost=cost.seq))
-		print(summary(tune.svm))
-		print(tune.svm$best.parameters$cost)
-		#print(tune.svm$best.modal$coefs)		
-		#print(svm.weights(tune.svm$best.modal))		
+		#print(summary(tune.svm))
+		#print(summary(tune.svm$best.model))
+		
 		svm.pred = predict(tune.svm$best.model, svm.dat.test)
 		svm.pred.train = predict(tune.svm$best.model, svm.dat.train)
 		
-		#print("prediction of testing data:")
-		#print(table(svm.dat.test$y, svm.pred))
-		#print("prediction of training data:")
-		#print(table(svm.dat.train$y, svm.pred.train))
+		print("prediction of testing data:")
+		print(table(svm.dat.test$y, svm.pred))
+		print("prediction of training data:")
+		print(table(svm.dat.train$y, svm.pred.train))
 		
 		result.test = compute.acc(svm.dat.test$y, svm.pred)
 		result.train = compute.acc(svm.dat.train$y, svm.pred.train)
@@ -157,6 +128,7 @@ svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 		test.result[i,] = result.test
 		train.result[i,] = result.train
 	}
+
 	print("feature.idx---------------------")
 	frequent.feature=as.numeric(names(sort(table(feature.idx.all),decreasing=TRUE)[1:3]))
 	print(frequent.feature)
@@ -168,11 +140,11 @@ svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 
 # svm binomial regression:
 library(e1071)
-
+library(CORElearn)
 report = data.frame(acc=rep(NA, report.rows),sensi=rep(NA,report.rows),speci=rep(NA,report.rows))
 report.sd = data.frame(acc=rep(NA, report.rows),sensi=rep(NA,report.rows),speci=rep(NA,report.rows))
 
-# ---------------------select data for hc and trauma :---------------------
+# ---------------------select data for hc and ptsd :---------------------
 
 idx = subject.info$ptsd==0|subject.info$ptsd==1
 set.seed(333)
@@ -205,7 +177,7 @@ print(train.result)
 report[2,]=colMeans(result, na.rm=T)
 report.sd[2,]=apply(result,2,function(x) sd(na.omit(x)))
 
-# ---------------------select data for hc and ptsd :---------------------
+# ---------------------select data for hc and trauma :---------------------
 
 idx = subject.info$ptsd==0|subject.info$ptsd==2
 set.seed(222)
@@ -224,9 +196,9 @@ report.sd[3,]=apply(result,2,function(x) sd(na.omit(x)))
 
 row.names(report) = c("hc vs trauma", "ptsd vs trauma", "hc vs ptsd")
 
-filename = paste("result_", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
+filename = paste("result_", report.name, "_k", toString(k), "_p", toString(p.thresh), "_relief", toString(relief.thresh), ".csv", sep = "")
 write.table(report, filename, sep = ",", row.names = T)
-filename = paste("result_sd", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
+filename = paste("result_sd", report.name, "_k", toString(k), "_p", toString(p.thresh), "_relief", toString(relief.thresh), ".csv", sep = "")
 write.table(report.sd, filename, sep = ",", row.names = T)
 
 print(report)

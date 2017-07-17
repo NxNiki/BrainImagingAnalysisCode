@@ -1,22 +1,28 @@
 #!/usr/bin/env Rscript
 
+# svm without t test to select features.
+# Xin Niu Apr.25.2017
+
+
 rm(list=ls())
 graphics.off()
 
-#source("scriptd_stats01_read_features.R")
-source("scriptd_stats01_read_pca_features.R")
+source("scriptd_stats01_read_feature.R")
+#source("scriptd_stats01_read_pca_features.R")
 
-#brain.feature = scale(cbind(fsl.vbm, alff, reho, label.fa, tract.fa, tract.md))
+brain.feature = scale(cbind(fsl.vbm, alff, reho, label.fa, tract.fa, tract.md))
 #brain.feature = scale(cbind(label.md.pca, tract.md.pca,falff.pca)) 
 #brain.feature = as.data.frame(scale(cbind(pc1)))
-brain.feature = cbind(pc1)
+#brain.feature = cbind(pc1)
 
 df.all = cbind(subject.info[,-1], brain.feature)
 
 compute.acc = function(y,yhat){
 	acc<-length(which(y==yhat))/length(y)
-	sensi<-length(which(y==yhat & y==1))/length(which(y==1))
-	speci<-length(which(y==yhat & y==0))/length(which(y==0))
+
+	ylevel = unique(y)
+	sensi<-length(which(y==yhat & y==ylevel[2]))/length(which(y==ylevel[2]))
+	speci<-length(which(y==yhat & y==ylevel[1]))/length(which(y==ylevel[1]))
 	temp<-c(acc, sensi, speci)
 	return(temp)
 }
@@ -68,17 +74,59 @@ error = data.frame(cv = c(1:k))
 train.error = data.frame(cv = c(1:k))
 library(e1071)
 
-## ---------------------select data for loc 0 and 1 :---------------------
+## ---------------------select data for ptsd 0 and 1 :---------------------
 
-df.loc = df.all[df.all$group_ind==0|df.all$group_ind==1,]
-print("dimension for loc dataset")
-print(dim(df.loc))
-print(table(df.loc$group_ind))
+df.subset = df.all[df.all$ptsd==0|df.all$ptsd==1,]
+print("dimension for subset dataset")
+print(dim(df.subset))
+print(table(df.subset$ptsd))
 
-x = model.matrix(df.loc$group_ind~., df.loc)
-y = as.factor(df.loc$group_ind)
+x = model.matrix(df.subset$ptsd~., df.subset)
+y = as.factor(df.subset$ptsd)
 
 set.seed(333)
+
+svm.cv.result = svm.cv.fun(x, y, k, cost.seq)
+result = svm.cv.result[[1]]
+train.result = svm.cv.result[[2]]
+
+print(result)
+print(colMeans(result))
+print(train.result)
+print(colMeans(train.result))
+
+## ---------------------select data for ptsd 1 and 2 :---------------------
+
+df.subset = df.all[df.all$ptsd==1|df.all$ptsd==2,]
+print("dimension for subset dataset")
+print(dim(df.subset))
+print(table(df.subset$ptsd))
+
+x = model.matrix(df.subset$ptsd~., df.subset)
+y = as.factor(df.subset$ptsd)
+
+set.seed(111)
+
+svm.cv.result = svm.cv.fun(x, y, k, cost.seq)
+result = svm.cv.result[[1]]
+train.result = svm.cv.result[[2]]
+
+print(result)
+print(colMeans(result))
+print(train.result)
+print(colMeans(train.result))
+
+## ---------------------select data for ptsd 0 and 2 :---------------------
+
+df.subset = df.all[df.all$ptsd==0|df.all$ptsd==2,]
+print("dimension for subset dataset")
+print(dim(df.subset))
+print(table(df.subset$ptsd))
+
+x = model.matrix(df.subset$ptsd~., df.subset)
+y = as.factor(df.subset$ptsd)
+
+set.seed(111)
 
 svm.cv.result = svm.cv.fun(x, y, k, cost.seq)
 result = svm.cv.result[[1]]

@@ -2,37 +2,52 @@
 rm(list=ls())
 graphics.off()
 
-#source("scriptd_stats01_read_feature_fc.R")
-#brain.feature = cbind(fc)
-#report.name = "fc"
+source("scriptd_stats01_read_feature_fc.R")
+brain.feature = cbind(fc)
+report.name = "fc_svmpca"
 
-source("scriptd_stats01_read_feature.R")
-#brain.feature = scale(cbind(spm.vbm, alff, reho, label.fa, label.md, tract.fa, tract.md))
-brain.feature = scale(cbind(reho))
-report.name = "reho_svmt"
+#source("scriptd_stats01_read_feature.R")
+#brain.feature = scale(cbind(spm.vbm, alff, reho, label.fa, label.md, tract.fa, tract.md, fc))
+#brain.feature = scale(tract.md)
+#report.name = "fcmultimodal_svmpca"
 
 # paramters for this script:
-p.thresh = .01
+#p.thresh = .001
 cost.seq = 10^seq(2, -3, length = 20)
 report.rows = 3
 k=7
+num.pc = 10
 
-select.feature = function(feature.in, factor, p){
-	
-	p.value = rep(NA, ncol(feature.in))
-	for (i.feature in 1:ncol(feature.in)) {
-		test.result = t.test(feature.in[,i.feature] ~ factor, var.equal=TRUE)
-		p.value[i.feature] = test.result$p.value
-	}
-	#test.result = lapply(feature.in, function(x) t.test(x ~ factor, var.equal = TRUE))
-	#p.value = test.result$p.value;
-	
-	feature.idx = which(p.value<p)
-	#print("selected features:")
-	#print(feature.idx)
-	return(feature.idx)
-
-}
+#select.pc.feature = function(feature.in, factor, p){
+#	pca = spca(feature.in, K=num.pc, para=rep(1,num.pc))
+#	
+#	print(dim(feature.in))
+#	print(dim(pca$loading))
+#
+#	pc = feature.in %*% pca$loadings
+#	
+#	p.value = rep(NA, num.pc)
+#	for (i.feature in 1:num.pc) {
+#		test.result = t.test(pc[,i.feature] ~ factor, var.equal=TRUE)
+#		p.value[i.feature] = test.result$p.value
+#	}
+#	#test.result = lapply(feature.in, function(x) t.test(x ~ factor, var.equal = TRUE))
+#	#p.value = test.result$p.value;
+#	
+#	feature.idx = which(p.value<p)
+#	pc[,-feature.idx]=0
+#	
+#	feature.out = pc %*% ginv(pca$loadings) 
+#
+#	feature.diff = (feature.in-feature.out)
+#	print(feature.diff)
+#
+#	colnames(feature.out)=colnames(feature.in)
+#	#print("selected features:")
+#	#print(feature.idx)
+#	return(feature.out)
+#
+#}
 
 ################################################
 # This function gives the weights of the hiperplane
@@ -115,7 +130,11 @@ svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 	test.result=data.frame(acc=rep(NA,k), sensi=rep(NA,k), speci=rep(NA,k))
 	train.result=data.frame(acc=rep(NA,k), sensi=rep(NA,k), speci=rep(NA,k))
 
-	feature.idx.all = vector()
+	#feature.idx.all = vector()
+	#feature.weights = data.frame(matrix(NA, ncol=ncol(brain.feature), nrow=k))
+	#colnames(feature.weights) = brain.feature[0,]
+	#print(ncol(feature.weights))
+	
 	for (i in 1:k){	
 		
 		brain.feature.train = brain.feature[cv.k!=i,]
@@ -124,53 +143,73 @@ svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 		subject.info.test = subject.info[which(cv.k==i),,drop = F]
 		
 		# select features bfactor runing t test:
-		feature.idx = select.feature(brain.feature.train, subject.info.train$ptsd, p.thresh)
-		feature.train = cbind(subject.info.train, y=brain.feature.train[, feature.idx, drop=F])
-		feature.test = cbind(subject.info.test, y=brain.feature.test[, feature.idx, drop=F])
+		pca = spca(brain.feature.train, K=num.pc, para=rep(1,num.pc))
+		print(brain.feature.train)
+		print(pca$loadings)
 		
-		feature.idx.all = c(feature.idx.all, feature.idx)
-		svm.x.train = model.matrix(feature.train$ptsd~., feature.train)
-		svm.y.train = as.factor(feature.train$ptsd)
+		feature.pca.train = brain.feature.train %*% pca$loadings
+		feature.pca.test = brain.feature.test %*% pca$loadings
 
-		svm.x.test = model.matrix(feature.test$ptsd~., feature.test)
-		svm.y.test = as.factor(feature.test$ptsd)
+		feature.train = cbind(subject.info.train, feature.pca.train)
+		feature.test = cbind(subject.info.test, feature.pca.test)
 		
-		svm.dat.train = data.frame(x=svm.x.train, y=svm.y.train)
-		svm.dat.test = data.frame(x=svm.x.test, y=svm.y.test)
-
-		tune.svm = tune(svm, y~., data = svm.dat.train, kernel = "linear", ranges = list(cost=cost.seq))
-		print(summary(tune.svm))
-		print(tune.svm$best.parameters$cost)
+		#feature.idx.all = c(feature.idx.all, feature.idx)
+		tune.svm = tune(svm, ptsd ~., data = feature.train, kernel = "linear", ranges = list(cost=cost.seq))
+		
+		#print(summary(tune.svm))
+		#print(tune.svm$best.parameters$cost)
 		#print(tune.svm$best.modal$coefs)		
 		#print(svm.weights(tune.svm$best.modal))		
-		svm.pred = predict(tune.svm$best.model, svm.dat.test)
-		svm.pred.train = predict(tune.svm$best.model, svm.dat.train)
 		
-		#print("prediction of testing data:")
-		#print(table(svm.dat.test$y, svm.pred))
-		#print("prediction of training data:")
-		#print(table(svm.dat.train$y, svm.pred.train))
+		svm.mod = svm(ptsd~., data = feature.train, kernel = "linear", cost = tune.svm$best.parameters$cost)
 		
-		result.test = compute.acc(svm.dat.test$y, svm.pred)
-		result.train = compute.acc(svm.dat.train$y, svm.pred.train)
+		weights.i = data.frame(svm.weights(svm.mod))
+		#print(weights.i)
+		colnames(weights.i) = colnames(subset(feature.train, select = -ptsd))
+		
+		if (i==1){
+			feature.weights = weights.i
+		}else{
+			feature.weights = rbind.fill(feature.weights, weights.i)
+		}
+
+		#svm.pred = predict(tune.svm$best.model, svm.dat.test)
+		svm.pred = predict(tune.svm$best.model, subset(feature.test, select=-ptsd))
+		#svm.pred.train = predict(tune.svm$best.model, svm.dat.train)
+		svm.pred.train = predict(tune.svm$best.model, subset(feature.train, select=-ptsd))
+		
+		print("prediction of testing data:")
+		#print(cbind(feature.test$ptsd, svm.pred))
+		print(table(feature.test$ptsd, svm.pred))
+		print("prediction of training data:")
+		print(table(feature.train$ptsd, svm.pred.train))
+		
+		result.test = compute.acc(feature.test$ptsd, svm.pred)
+		result.train = compute.acc(feature.train$ptsd, svm.pred.train)
 
 		test.result[i,] = result.test
 		train.result[i,] = result.train
 	}
-	print("feature.idx---------------------")
-	frequent.feature=as.numeric(names(sort(table(feature.idx.all),decreasing=TRUE)[1:3]))
-	print(frequent.feature)
-	print(brain.feature[1, frequent.feature])
-	print("feature.idx---------------------")
-	return(list(test.result, train.result))
+	#print("feature.idx---------------------")
+	#print(sort(table(feature.idx.all),decreasing=T))
+	#frequent.feature=as.numeric(names(sort(table(feature.idx.all),decreasing=TRUE)[1:3]))
+	#print(frequent.feature)
+	#print(brain.feature[1, frequent.feature])
+	#print("feature.idx---------------------")
+	return(list(test.result, train.result, feature.weights))
 }
 
 
 # svm binomial regression:
 library(e1071)
+library(plyr)
+library(elasticnet)
+library(MASS)
 
 report = data.frame(acc=rep(NA, report.rows),sensi=rep(NA,report.rows),speci=rep(NA,report.rows))
 report.sd = data.frame(acc=rep(NA, report.rows),sensi=rep(NA,report.rows),speci=rep(NA,report.rows))
+
+subject.info$ptsd = as.factor(subject.info$ptsd)
 
 # ---------------------select data for hc and trauma :---------------------
 
@@ -183,9 +222,15 @@ set.seed(333)
 svm.cv.result = svm.cv.fun(subject.info[idx,-1], brain.feature[idx,], k, cost.seq, p.thresh)
 result = svm.cv.result[[1]]
 train.result = svm.cv.result[[2]]
+feature.weights = svm.cv.result[[3]]
+feature.weights.mean = as.data.frame.list(colMeans(feature.weights, na.rm=T))
 
 print(result)
 print(train.result)
+print(feature.weights)
+
+filename = paste("result_featureweights_hc_trauma", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
+write.table(rbind(feature.weights, feature.weights.mean), filename, sep = ",", row.names = F)
 
 report[1,]=colMeans(result, na.rm=T)
 report.sd[1,]=apply(result,2,function(x) sd(na.omit(x)))
@@ -198,9 +243,15 @@ set.seed(111)
 svm.cv.result = svm.cv.fun(subject.info[idx,-1], brain.feature[idx,], k, cost.seq, p.thresh)
 result = svm.cv.result[[1]]
 train.result = svm.cv.result[[2]]
+feature.weights = svm.cv.result[[3]]
+feature.weights.mean = as.data.frame.list(colMeans(feature.weights, na.rm=T))
 
 print(result)
 print(train.result)
+print(feature.weights)
+
+filename = paste("result_featureweights_ptsd_trauma", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
+write.table(rbind(feature.weights, feature.weights.mean), filename, sep = ",", row.names = F)
 
 report[2,]=colMeans(result, na.rm=T)
 report.sd[2,]=apply(result,2,function(x) sd(na.omit(x)))
@@ -213,9 +264,15 @@ set.seed(222)
 svm.cv.result = svm.cv.fun(subject.info[idx,-1], brain.feature[idx,], k, cost.seq, p.thresh)
 result = svm.cv.result[[1]]
 train.result = svm.cv.result[[2]]
+feature.weights = svm.cv.result[[3]]
+feature.weights.mean = as.data.frame.list(colMeans(feature.weights, na.rm=T))
 
 print(result)
 print(train.result)
+print(feature.weights)
+
+filename = paste("result_featureweights_hc_ptsd", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
+write.table(rbind(feature.weights, feature.weights.mean), filename, sep = ",", row.names = F)
 
 report[3,]=colMeans(result, na.rm=T)
 report.sd[3,]=apply(result,2,function(x) sd(na.omit(x)))
@@ -224,9 +281,9 @@ report.sd[3,]=apply(result,2,function(x) sd(na.omit(x)))
 
 row.names(report) = c("hc vs trauma", "ptsd vs trauma", "hc vs ptsd")
 
-filename = paste("result_", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
+filename = paste("result_", report.name, "_k", toString(k), "_pc", toString(num.pc), ".csv", sep = "")
 write.table(report, filename, sep = ",", row.names = T)
-filename = paste("result_sd", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
+filename = paste("result_sd", report.name, "_k", toString(k), "_pc", toString(num.pc), ".csv", sep = "")
 write.table(report.sd, filename, sep = ",", row.names = T)
 
 print(report)

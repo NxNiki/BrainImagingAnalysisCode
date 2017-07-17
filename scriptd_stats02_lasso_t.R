@@ -7,9 +7,10 @@ graphics.off()
 #report.name = "fc"
 
 source("scriptd_stats01_read_feature.R")
-#brain.feature = scale(cbind(spm.vbm, alff, reho, label.fa, label.md, tract.fa, tract.md))
-brain.feature = scale(cbind(reho))
-report.name = "reho_svmt"
+brain.feature = scale(cbind(spm.vbm, alff, reho, label.fa, label.md, tract.fa, tract.md))
+report.name = "multimodal_lasso_t"
+#brain.feature = scale(cbind(spm.vbm))
+#report.name = "spm.vbm"
 
 # paramters for this script:
 p.thresh = .01
@@ -28,49 +29,11 @@ select.feature = function(feature.in, factor, p){
 	#p.value = test.result$p.value;
 	
 	feature.idx = which(p.value<p)
-	#print("selected features:")
-	#print(feature.idx)
+	print("selected features:")
+	print(feature.idx)
 	return(feature.idx)
 
 }
-
-################################################
-# This function gives the weights of the hiperplane
-################################################
-svm.weights<-function(model){
-w=0
-  if(model$nclasses==2){
-       w=t(model$coefs)%*%model$SV
-  }else{    #when we deal with OVO svm classification
-      ## compute start-index
-      start <- c(1, cumsum(model$nSV)+1)
-      start <- start[-length(start)]
-
-      calcw <- function (i,j) {
-        ## ranges for class i and j:
-        ri <- start[i] : (start[i] + model$nSV[i] - 1)
-        rj <- start[j] : (start[j] + model$nSV[j] - 1)
-
-      ## coefs for (i,j):
-        coef1 <- model$coefs[ri, j-1]
-        coef2 <- model$coefs[rj, i]
-        ## return w values:
-        w=t(coef1)%*%model$SV[ri,]+t(coef2)%*%model$SV[rj,]
-        return(w)
-      }
-
-      W=NULL
-      for (i in 1 : (model$nclasses - 1)){
-        for (j in (i + 1) : model$nclasses){
-          wi=calcw(i,j)
-          W=rbind(W,wi)
-        }
-      }
-      w=W
-  }
-  return(w)
-}
-
 
 compute.acc = function(y,yhat){
 	#print("----------")
@@ -81,8 +44,8 @@ compute.acc = function(y,yhat){
 	y = as.numeric(y)
 	yhat = as.numeric(yhat)
 
-	#print(sum(y==yhat))
-	#print(length(y))
+	print(sum(y==yhat))
+	print(length(y))
 	acc<-sum(y==yhat)/length(y)
 	
 	ylevel = unique(y)
@@ -102,7 +65,7 @@ compute.acc = function(y,yhat){
 	return(temp)
 }
 
-svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
+cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 	
 	#sort data according to y so that we have ballanced value in each group:
 	idx.order.factor = order(subject.info$ptsd)
@@ -111,7 +74,7 @@ svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 
 	num.sample = nrow(brain.feature)
 	cv.k = sample(rep(1:k, each = ceiling(num.sample/k)))[1:num.sample]
-	
+	print(sort(cv.k))	
 	test.result=data.frame(acc=rep(NA,k), sensi=rep(NA,k), speci=rep(NA,k))
 	train.result=data.frame(acc=rep(NA,k), sensi=rep(NA,k), speci=rep(NA,k))
 
@@ -129,27 +92,24 @@ svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 		feature.test = cbind(subject.info.test, y=brain.feature.test[, feature.idx, drop=F])
 		
 		feature.idx.all = c(feature.idx.all, feature.idx)
-		svm.x.train = model.matrix(feature.train$ptsd~., feature.train)
-		svm.y.train = as.factor(feature.train$ptsd)
+		# remove the 1st column of all ones:
+		x.train = model.matrix(feature.train$ptsd~., feature.train)[,-1]
+		y.train = as.factor(feature.train$ptsd)
 
-		svm.x.test = model.matrix(feature.test$ptsd~., feature.test)
-		svm.y.test = as.factor(feature.test$ptsd)
+		x.test = model.matrix(feature.test$ptsd~., feature.test)
+		y.test = as.factor(feature.test$ptsd)
 		
-		svm.dat.train = data.frame(x=svm.x.train, y=svm.y.train)
-		svm.dat.test = data.frame(x=svm.x.test, y=svm.y.test)
-
-		tune.svm = tune(svm, y~., data = svm.dat.train, kernel = "linear", ranges = list(cost=cost.seq))
-		print(summary(tune.svm))
-		print(tune.svm$best.parameters$cost)
-		#print(tune.svm$best.modal$coefs)		
-		#print(svm.weights(tune.svm$best.modal))		
-		svm.pred = predict(tune.svm$best.model, svm.dat.test)
-		svm.pred.train = predict(tune.svm$best.model, svm.dat.train)
+		cv.out = cv.glmnet(x.train, y.train, alpha=1)
+		print(cv.out)
+		print(names(cv.out))
 		
-		#print("prediction of testing data:")
-		#print(table(svm.dat.test$y, svm.pred))
-		#print("prediction of training data:")
-		#print(table(svm.dat.train$y, svm.pred.train))
+		svm.pred = predict(cv.out$best.model, svm.dat.test)
+		svm.pred.train = predict(cv.out$best.model, svm.dat.train)
+		
+		print("prediction of testing data:")
+		print(table(svm.dat.test$y, svm.pred))
+		print("prediction of training data:")
+		print(table(svm.dat.train$y, svm.pred.train))
 		
 		result.test = compute.acc(svm.dat.test$y, svm.pred)
 		result.train = compute.acc(svm.dat.train$y, svm.pred.train)
@@ -166,13 +126,13 @@ svm.cv.fun = function(subject.info, brain.feature, k, cost.seq, p.thresh){
 }
 
 
-# svm binomial regression:
-library(e1071)
+# glmnet regression:
+library(glmnet)
 
 report = data.frame(acc=rep(NA, report.rows),sensi=rep(NA,report.rows),speci=rep(NA,report.rows))
 report.sd = data.frame(acc=rep(NA, report.rows),sensi=rep(NA,report.rows),speci=rep(NA,report.rows))
 
-# ---------------------select data for hc and trauma :---------------------
+# ---------------------select data for hc and ptsd :---------------------
 
 idx = subject.info$ptsd==0|subject.info$ptsd==1
 set.seed(333)
@@ -180,7 +140,7 @@ set.seed(333)
 #error = data.frame(cv = c(1:k))
 #train.error = data.frame(cv = c(1:k))
 
-svm.cv.result = svm.cv.fun(subject.info[idx,-1], brain.feature[idx,], k, cost.seq, p.thresh)
+svm.cv.result = cv.fun(subject.info[idx,-1], brain.feature[idx,], k, cost.seq, p.thresh)
 result = svm.cv.result[[1]]
 train.result = svm.cv.result[[2]]
 
@@ -195,7 +155,7 @@ report.sd[1,]=apply(result,2,function(x) sd(na.omit(x)))
 idx = subject.info$ptsd==1|subject.info$ptsd==2
 set.seed(111)
 
-svm.cv.result = svm.cv.fun(subject.info[idx,-1], brain.feature[idx,], k, cost.seq, p.thresh)
+svm.cv.result = cv.fun(subject.info[idx,-1], brain.feature[idx,], k, cost.seq, p.thresh)
 result = svm.cv.result[[1]]
 train.result = svm.cv.result[[2]]
 
@@ -205,12 +165,12 @@ print(train.result)
 report[2,]=colMeans(result, na.rm=T)
 report.sd[2,]=apply(result,2,function(x) sd(na.omit(x)))
 
-# ---------------------select data for hc and ptsd :---------------------
+# ---------------------select data for hc and trauma :---------------------
 
 idx = subject.info$ptsd==0|subject.info$ptsd==2
 set.seed(222)
 
-svm.cv.result = svm.cv.fun(subject.info[idx,-1], brain.feature[idx,], k, cost.seq, p.thresh)
+svm.cv.result = cv.fun(subject.info[idx,-1], brain.feature[idx,], k, cost.seq, p.thresh)
 result = svm.cv.result[[1]]
 train.result = svm.cv.result[[2]]
 
@@ -224,9 +184,9 @@ report.sd[3,]=apply(result,2,function(x) sd(na.omit(x)))
 
 row.names(report) = c("hc vs trauma", "ptsd vs trauma", "hc vs ptsd")
 
-filename = paste("result_", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
+filename = paste("result", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
 write.table(report, filename, sep = ",", row.names = T)
-filename = paste("result_sd", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
+filename = paste("result_", report.name, "_k", toString(k), "_p", toString(p.thresh), ".csv", sep = "")
 write.table(report.sd, filename, sep = ",", row.names = T)
 
 print(report)
