@@ -48,6 +48,8 @@ mask_thresh=30
 if [ "$Make4DImg" = true ]; then
 	# make 4D image if images are 3d in specifid directory:
 	if [ "$DoFlirt" = true ];then
+	# this is inefficient, we can downsample the mask rather than upsample the data image.
+	# see code in brain_imaging_unc. (Niki)
 		echo flirt on 3d iamges:
 		for img_3d in $img_dir/${prefix}*.nii; do
 			image_name=${img_3d%%.nii}
